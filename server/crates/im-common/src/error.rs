@@ -43,6 +43,66 @@ impl AppError {
         Self::new(1005, "请求过于频繁，请稍后再试")
     }
 
+    /// 1003 验证码错误/过期。
+    pub fn code_invalid() -> Self {
+        Self::new(1003, "验证码错误或已过期")
+    }
+
+    /// 1004 凭证错误（账号或密码错误、邮箱未注册、账号禁用等登录类失败）。
+    pub fn invalid_credentials(msg: impl Into<String>) -> Self {
+        Self::new(1004, msg)
+    }
+
+    /// 1007 资源冲突/已占用（用户名重复、邮箱已注册等）。
+    pub fn conflict(msg: impl Into<String>) -> Self {
+        Self::new(1007, msg)
+    }
+
+    /// 1008 资源不存在（通用请求段补充码，映射 HTTP 404）。
+    pub fn not_found(msg: impl Into<String>) -> Self {
+        Self::new(1008, msg)
+    }
+
+    /// 3001 已是好友（重复加好友/重复同意）。
+    pub fn already_friends() -> Self {
+        Self::new(3001, "你们已经是好友了")
+    }
+
+    /// 3002 好友申请状态冲突（对方有待处理申请/申请已被处理）。
+    pub fn request_conflict(msg: impl Into<String>) -> Self {
+        Self::new(3002, msg)
+    }
+
+    /// 3004 无权限执行该操作（处理他人的申请等）。
+    pub fn forbidden(msg: impl Into<String>) -> Self {
+        Self::new(3004, msg)
+    }
+
+    /// 3003 群成员已达上限（建群/邀请/申请审批共用）。
+    pub fn group_full() -> Self {
+        Self::new(3003, "群成员已达上限")
+    }
+
+    /// 3005 已是群成员（重复邀请/重复入群）。
+    pub fn already_member() -> Self {
+        Self::new(3005, "已是群成员")
+    }
+
+    /// 2001 会话不存在。
+    pub fn conv_not_found() -> Self {
+        Self::new(2001, "会话不存在")
+    }
+
+    /// 2002 非会话成员/无权操作该会话（含删好友后旧单聊只读，计划书 7.3）。
+    pub fn not_conv_member(msg: impl Into<String>) -> Self {
+        Self::new(2002, msg)
+    }
+
+    /// 2003 消息内容非法（空内容/超长/类型不允许）。
+    pub fn invalid_content(msg: impl Into<String>) -> Self {
+        Self::new(2003, msg)
+    }
+
     /// 1006 参数校验失败。
     pub fn bad_request(msg: impl Into<String>) -> Self {
         Self::new(1006, msg)
@@ -59,6 +119,7 @@ impl AppError {
             1001 | 1002 | 1004 => StatusCode::UNAUTHORIZED, // 未登录/过期/凭证错误
             1003 | 1006 => StatusCode::BAD_REQUEST,         // 验证码错误/参数校验
             1007 => StatusCode::CONFLICT,                   // 资源冲突/已占用
+            1008 => StatusCode::NOT_FOUND,                  // 资源不存在
             1005 => StatusCode::TOO_MANY_REQUESTS,          // 限流
             2001..=2005 => StatusCode::BAD_REQUEST,         // 消息域
             3001 | 3002 | 3005 => StatusCode::CONFLICT,     // 关系链冲突

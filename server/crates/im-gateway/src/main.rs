@@ -41,8 +41,18 @@ async fn main() {
         std::process::exit(healthcheck());
     }
 
-    // 仅本机 cargo run 时读取 .env；容器内由 compose 注入环境变量（无 .env 自动跳过）
-    dotenvy::dotenv().ok();
+    // 仅本机 cargo run 时读取 .env；容器内由 compose 注入环境变量（无 .env 自动跳过）。
+    // 注意：dotenvy 解析到非法行会中止该行之后的全部加载，这里必须显式告警，
+    // 否则会造成"配置明明写了却读不到"的静默故障（如值含空格未加引号）
+    if let Err(e) = dotenvy::dotenv() {
+        let not_found =
+            matches!(&e, dotenvy::Error::Io(io) if io.kind() == std::io::ErrorKind::NotFound);
+        if !not_found {
+            eprintln!(
+                "警告：.env 加载失败：{e}（典型原因：值含空格未加引号；出错行之后的所有变量不会生效）"
+            );
+        }
+    }
     let cfg = Config::from_env();
     im_common::log::init(&cfg.rust_log, &cfg.log_format);
 

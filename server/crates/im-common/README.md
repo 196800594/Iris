@@ -21,8 +21,10 @@ im-common = { path = "../im-common" }
 ```
 
 ```rust
-// 二进制入口的标准开场（先 dotenvy 后 Config）
-dotenvy::dotenv().ok();
+// 二进制入口的标准开场（先 dotenvy 后 Config；完整写法见 im-logic / im-gateway main.rs）
+// 注意：不能用 dotenvy::dotenv().ok() 静默吞错——dotenvy 遇非法行会中止该行之后的全部加载，
+// 必须区分"文件不存在=容器模式正常"与"解析失败须告警"两种情况
+if let Err(e) = dotenvy::dotenv() { /* 见 main.rs：NotFound 跳过，其余 eprintln 告警 */ }
 let cfg = im_common::config::Config::from_env();
 im_common::log::init(&cfg.rust_log, &cfg.log_format);
 im_common::id::init(&cfg.logic_node_id); // 仅 im-logic 需要

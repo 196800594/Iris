@@ -41,6 +41,20 @@ sonyflake = "0.2"
 rand = "0.8"
 dotenvy = "0.15"
 
+# ---- 账号认证（W2） ----
+jsonwebtoken = "9.3"
+argon2 = "0.5"
+validator = { version = "0.18", features = ["derive"] }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }
+regex = "1"
+once_cell = "1"
+
+# ---- 文件存储（W8） ----
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+
 # ---- 构建期（im-proto 专用）----
 tonic-build = "0.12"
 prost-build = "0.13"

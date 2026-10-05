@@ -10,16 +10,27 @@
 //! 4. 建 Redis 连接；
 //! 5. 并发启动 REST(7200) 与 gRPC(7201)，优雅停机。
 //!
-//! W1 骨架范围：迁移 + 健康检查 + GatewayLink 双向流（ClientMsg 回 5000 占位响应）；
-//! auth 等业务模块 W2 起逐周填充（见计划书 13 章里程碑）。
+//! W2 已接入：auth（验证码/注册/登录/JWT 双令牌/找回密码/WS ticket）、users（资料/搜索）、
+//! ForceKick 链路；W3 已接入：contacts（好友申请/审批/列表/备注/删除）；
+//! W4-5 已接入：message（发送/幂等/ack/push/sync/read/presence）、conversations（REST）。
+//!
+//! groups / files W6 起逐周填充（见计划书 13 章里程碑）。
 
+mod auth;
+mod contacts;
+mod conversations;
+mod groups;
 mod grpc;
 mod http;
+mod message;
+mod middleware;
+mod users;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use im_common::config::Config;
+use redis::AsyncCommands as _;
 use sqlx::mysql::MySqlPoolOptions;
 
 /// logic 全局共享状态：配置、MySQL 池、Redis 连接、网关节点注册表。
@@ -42,8 +53,18 @@ async fn main() {
         std::process::exit(healthcheck());
     }
 
-    // 仅本机 cargo run 时读取 .env；容器内由 compose env_file 注入（无 .env 自动跳过）
-    dotenvy::dotenv().ok();
+    // 仅本机 cargo run 时读取 .env；容器内由 compose env_file 注入（无 .env 自动跳过）。
+    // 注意：dotenvy 解析到非法行会中止该行之后的全部加载，这里必须显式告警，
+    // 否则会造成"配置明明写了却读不到"的静默故障（如值含空格未加引号）
+    if let Err(e) = dotenvy::dotenv() {
+        let not_found =
+            matches!(&e, dotenvy::Error::Io(io) if io.kind() == std::io::ErrorKind::NotFound);
+        if !not_found {
+            eprintln!(
+                "警告：.env 加载失败：{e}（典型原因：值含空格未加引号；出错行之后的所有变量不会生效）"
+            );
+        }
+    }
     let cfg = Config::from_env();
     im_common::log::init(&cfg.rust_log, &cfg.log_format);
     im_common::id::init(&cfg.logic_node_id);
@@ -85,6 +106,30 @@ async fn main() {
     tokio::select! {
         r = grpc_task => r.expect("grpc 任务 panic").expect("gRPC 服务异常退出"),
         r = http_task => r.expect("http 任务 panic").expect("REST 服务异常退出"),
+    }
+}
+
+/// 强制某用户全部 WS 连接下线（计划书 5.4）。
+///
+/// 触发场景：refresh 盗用整族吊销 / 重置密码后全端下线 / 账号禁用。
+/// 实现路径：查 Redis `presence:{uid}` 得到用户所在网关节点 →
+/// 经节点注册表下发 `Downstream::ForceKick`，网关以 close 4001 关闭其全部连接。
+/// 用户不在线（无 presence 键）时静默跳过。
+pub async fn force_kick(state: &AppState, uid: u64, reason: &str) {
+    let mut redis = state.redis.clone();
+    let node: Option<String> = redis
+        .get(im_common::redis_keys::presence(uid))
+        .await
+        .unwrap_or(None);
+    match node {
+        Some(node_id) => {
+            state.nodes.kick(uid, node_id, reason).await;
+            tracing::info!(uid, reason, "force kick dispatched");
+        }
+        None => {
+            // 用户不在线：无需踢下线（refresh 已吊销，重连时会话态自然失效）
+            tracing::debug!(uid, reason, "force kick skipped: user offline");
+        }
     }
 }
 

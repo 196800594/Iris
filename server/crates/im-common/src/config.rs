@@ -3,8 +3,9 @@
 //! 纪律（技术文档 9 节）：一切环境相关参数只能来自环境变量；代码不硬编码密码/地址/密钥。
 //! 变量清单与逐行中文注释见 `server/.env.example`（三处必须同步：example、本结构体、compose）。
 //!
-//! 读取策略：二进制入口先调用 `dotenvy::dotenv().ok()`（仅本机 cargo run 生效；
+//! 读取策略：二进制入口先 `dotenvy::dotenv()`（仅本机 cargo run 生效；
 //! 容器内环境变量由 compose 注入，无 .env 文件时自动跳过），随后 `Config::from_env()`。
+//! 注意：dotenvy 遇到无法解析的行会中止该行之后的全部加载，入口必须显式告警不能静默吞错。
 //! 必填项缺失 → fail-fast panic（启动期尽早暴露配置错误）。
 
 use std::env;
@@ -63,6 +64,8 @@ pub struct Config {
     pub refresh_token_ttl_seconds: u64,
     /// WS 一次性 ticket 有效期（秒，默认 30）
     pub ws_ticket_ttl_seconds: u64,
+    /// 鉴权类接口每 IP 每分钟请求上限（登录/发码/注册/重置，默认 10）
+    pub auth_rate_limit_per_minute: u32,
 
     // ---- WS 连接参数 ----
     /// WS 静默超时（秒，无任何帧即断开，默认 90）
@@ -152,6 +155,9 @@ impl Config {
             ws_ticket_ttl_seconds: opt("WS_TICKET_TTL_SECONDS")
                 .map(|v| v.parse().expect("WS_TICKET_TTL_SECONDS 必须是数字"))
                 .unwrap_or(30),
+            auth_rate_limit_per_minute: opt("AUTH_RATE_LIMIT_PER_MINUTE")
+                .map(|v| v.parse().expect("AUTH_RATE_LIMIT_PER_MINUTE 必须是数字"))
+                .unwrap_or(10),
 
             // ---- WS 连接参数 ----
             ws_heartbeat_timeout_seconds: opt("WS_HEARTBEAT_TIMEOUT_SECONDS")

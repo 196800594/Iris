@@ -1,8 +1,9 @@
 //! REST 服务（7200，前缀 /api/v1）。
 //!
-//! W1 骨架仅含 `/healthz`（检查 DB/Redis 连通性）；auth/users/contacts 等
-//! 路由 W2 起按技术文档 5.2 接口清单逐周填充。
+//! 路由段：/healthz（健康检查）+ /api/v1（auth / users，W3 起继续挂 contacts 等）。
+//! 每个请求经 request_id 中间件（x-request-id 响应头 + 日志 span 关联）。
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -14,30 +15,48 @@ use tower_http::trace::TraceLayer;
 
 use crate::AppState;
 
+/// /api/v1 业务路由集合（W2：auth + users；W3：contacts；W4-5：conversations；W6-7：groups）。
+fn api_routes() -> Router<Arc<AppState>> {
+    crate::auth::router()
+        .merge(crate::users::router())
+        .merge(crate::contacts::router())
+        .merge(crate::conversations::router())
+        .merge(crate::groups::router())
+}
+
 /// 组装 REST 路由。
 ///
 /// - `/healthz`：健康检查（无需鉴权，返回 DB/Redis 连通状态）；
+/// - `/api/v1/...`：业务接口（auth 公开、users 需 Bearer access）；
 /// - CORS：development 放开 `*`；production 按 `CORS_ORIGINS` 白名单收敛（计划书 6.7）；
-/// - Trace：每个请求一行 tracing 日志（request_id 链路 W2 接入）。
+/// - Trace + request_id：每请求一行 tracing 日志与 x-request-id 响应头。
 pub fn build_router(state: Arc<AppState>) -> Router {
     let cors = build_cors(&state.cfg.cors_origins, state.cfg.is_dev());
 
     Router::new()
         .route("/healthz", get(healthz))
-        // /api/v1 业务路由挂载点（W2 起逐段填充：.nest("/api/v1", auth_routes())）
+        .nest("/api/v1", api_routes())
         .with_state(state)
-        .layer(cors)
+        // request_id 先于 trace 执行（Layer 后加的先执行），保证 span 带 rid
+        .layer(axum::middleware::from_fn(crate::middleware::request_id))
         .layer(TraceLayer::new_for_http())
+        .layer(cors)
 }
 
 /// REST 服务主循环：监听 `LOGIC_HTTP_ADDR`，优雅停机。
+///
+/// 使用 `into_make_service_with_connect_info` 注入对端地址，
+/// 供鉴权接口 IP 限流（auth::extract_ip 的兜底来源）。
 pub async fn serve(state: Arc<AppState>) -> std::io::Result<()> {
     let addr = state.cfg.logic_http_addr.clone();
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(crate::shutdown_signal())
-        .await
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(crate::shutdown_signal())
+    .await
 }
 
 /// 健康检查：DB 执行 `SELECT 1`、Redis 执行 `PING`，任一失败返回 503。

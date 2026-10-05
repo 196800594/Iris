@@ -46,9 +46,10 @@ message Frame {
 // method=message.send 发送消息
 message MessageSendReq {
   string client_msg_id = 1; // 客户端 UUID，幂等键（Redis 24h + 库唯一键双层兜底）
-  uint64 conv_id = 2;       // 目标会话 ID
+  uint64 conv_id = 2;       // 目标会话 ID；0 表示首次单聊（配合 to_uid 懒建会话）
   MsgType msg_type = 3;     // 消息类型
   string content = 4;       // 文本原文或媒体 JSON 引用
+  uint64 to_uid = 5;        // conv_id=0 时必填：对端 uid，服务端按 dialog_key 查找/创建单聊会话
 }
 
 // NOTICE=message.ack 发送确认（重发同 client_msg_id 返回同一 ack）
@@ -89,6 +90,11 @@ message ConvSyncResp {
   uint64 conv_id = 1;              // 会话 ID
   repeated SyncMessage messages = 2; // 本批消息（seq 升序）
   bool has_more = 3;               // 是否还有更多
+}
+
+// method=conv.sync 响应（RESPONSE payload，多会话一批）
+message ConvSyncBatchResp {
+  repeated ConvSyncResp convs = 1; // 每会话一批，与请求 cursors 顺序一致
 }
 
 // method=conv.read 上报已读水位（仅允许单调前进）

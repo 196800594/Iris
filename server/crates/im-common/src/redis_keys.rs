@@ -9,6 +9,9 @@
 //! | ws:ticket:{ticket} | string | 30s | WS 一次性建连票据（GETDEL） |
 //! | msg:idem:{conv_id}:{client_msg_id} | string | 24h | 发送幂等快速窗口（库唯一键兜底） |
 //! | presence:{uid} | string | 120s | 用户在线状态与所在节点（30s 续期） |
+//! | presence:chg:{uid} | string | 10s | presence.change 推送限频（10 秒/人，防抖动风暴） |
+//! | refresh:fam:{family_id} | hash | 30d | refresh 轮换族（uid + jti→状态），盗用检测依据 |
+//! | refresh:user:{uid} | set | 30d | 用户全部 refresh 族（重置密码/登出时整族吊销） |
 
 use std::time::Duration;
 
@@ -55,7 +58,35 @@ pub fn presence(uid: u64) -> String {
     format!("presence:{uid}")
 }
 
+/// presence.change 推送限频键：`presence:chg:{接收者uid}`（SET NX EX 10，抢到才推）。
+pub fn presence_chg_limited(receiver_uid: u64) -> String {
+    format!("presence:chg:{receiver_uid}")
+}
+
 /// 用户连接计数键：`presence:conns:{uid}`（网关 INCR/DECR，0→1/1→0 触发 PresenceEvent）。
 pub fn presence_conns(uid: u64) -> String {
     format!("presence:conns:{uid}")
 }
+
+/// refresh 轮换族键：`refresh:fam:{family_id}`。
+///
+/// Hash 结构：`uid` 字段存属主；`jti:{jti}` 字段存该令牌状态
+/// （active 在用 / rotated 已被轮换 / revoked 已吊销）。
+/// 已轮换/已吊销的 jti 必须保留记录（而非删除），否则无法识别"旧令牌被复用"的盗用行为。
+pub fn refresh_family(family_id: &str) -> String {
+    format!("refresh:fam:{family_id}")
+}
+
+/// 用户 refresh 族集合键：`refresh:user:{uid}`（成员为 family_id）。
+pub fn refresh_user(uid: u64) -> String {
+    format!("refresh:user:{uid}")
+}
+
+/// refresh 族 Hash 内的属主字段名。
+pub const REFRESH_FIELD_UID: &str = "uid";
+/// refresh 令牌状态：在用（可正常轮换）。
+pub const REFRESH_STATE_ACTIVE: &str = "active";
+/// refresh 令牌状态：已被轮换（再次使用即盗用）。
+pub const REFRESH_STATE_ROTATED: &str = "rotated";
+/// refresh 令牌状态：已吊销（再次使用即盗用）。
+pub const REFRESH_STATE_REVOKED: &str = "revoked";

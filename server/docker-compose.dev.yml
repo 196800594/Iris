@@ -1,13 +1,15 @@
 # 开发覆盖文件（技术文档 8.2）：
 #   用途："基础设施容器化、服务本机 cargo 跑"的开发模式
 #   用法：docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mysql redis
-#   要点：3306/6379 映射到宿主机 127.0.0.1、上传卷换本机 bind mount、日志级别 debug
+#   要点：MySQL/Redis 端口映射到宿主机 127.0.0.1、上传卷换本机 bind mount、日志级别 debug
+#   注：宿主机端口可自定义（改"左值"避开本机占用），容器端口（右值）不动；
+#       自定义后须同步 .env：MYSQL_PORT=<mysql 左值>、REDIS_URL=redis://127.0.0.1:<redis 左值>/0
 services:
   mysql:
-    ports: ["127.0.0.1:3306:3306"]   # 本机 cargo 直跑连这里
+    ports: ["127.0.0.1:16800:3306"]   # 本机 cargo 直跑连这里
 
   redis:
-    ports: ["127.0.0.1:6379:6379"]
+    ports: ["127.0.0.1:16808:6379"]
 
   logic:
     environment:

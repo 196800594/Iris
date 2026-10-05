@@ -25,3 +25,18 @@ sqlx = { workspace = true }
 redis = { workspace = true }
 tracing = { workspace = true }
 dotenvy = { workspace = true }
+# ---- W2 账号认证 ----
+jsonwebtoken = { workspace = true }
+argon2 = { workspace = true }
+validator = { workspace = true }
+lettre = { workspace = true }
+rand = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+regex = { workspace = true }
+once_cell = { workspace = true }
+# ---- W8 图片/文件 ----
+image = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }

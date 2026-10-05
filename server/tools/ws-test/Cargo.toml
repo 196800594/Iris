@@ -1,0 +1,19 @@
+# Iris WS 联调测试工具（独立 Cargo 项目，非 workspace 成员，计划书 13 章工具约定）
+# 用途：W4-5 起消息管线的端到端人工/脚本联调——建连、发送、同步、已读、被动收帧。
+# 帧编码为手工 protobuf（proto3 wire format），不依赖 im-proto，保持轻量。
+[package]
+name = "ws-test"
+version = "0.1.0"
+edition = "2021"
+
+# 独立项目：显式脱离上层 cargo workspace（计划书工具约定）
+[workspace]
+
+[[bin]]
+name = "ws-test"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "time"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"

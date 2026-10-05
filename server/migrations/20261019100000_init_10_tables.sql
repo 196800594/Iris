@@ -90,8 +90,8 @@ CREATE TABLE conversation_members (
   KEY idx_cm_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会话成员';
 
--- 群
-CREATE TABLE groups (
+-- 群（注意：groups 是 MySQL 8.0.2+ 保留字，建表必须加反引号）
+CREATE TABLE `groups` (
   id            BIGINT UNSIGNED NOT NULL,
   conv_id       BIGINT UNSIGNED NOT NULL COMMENT '对应会话',
   name          VARCHAR(64) NOT NULL,
