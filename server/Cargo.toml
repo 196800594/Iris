@@ -1,0 +1,47 @@
+# Iris 服务端 Cargo workspace（计划书 4 章 / 技术文档 3.1 版本基线）
+# 四个成员：im-proto（契约）、im-common（公共库）、im-gateway（网关）、im-logic（业务）
+[workspace]
+resolver = "2"
+members = [
+    "crates/im-proto",
+    "crates/im-common",
+    "crates/im-gateway",
+    "crates/im-logic",
+]
+
+# workspace 统一依赖版本：各 crate 只写 use 声明式引用（dep = { workspace = true }）
+[workspace.dependencies]
+# ---- 异步运行时与 Web ----
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+axum = { version = "0.8", features = ["ws", "multipart"] }
+tonic = { version = "0.12", features = ["transport"] }
+prost = "0.13"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+futures = "0.3"
+tokio-stream = "0.1"
+
+# ---- 数据访问 ----
+sqlx = { version = "0.8", default-features = false, features = ["mysql", "runtime-tokio-rustls", "chrono", "uuid", "migrate", "macros"] }
+redis = { version = "0.27", features = ["aio", "tokio-comp", "connection-manager"] }
+
+# ---- 协议与序列化 ----
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# ---- 可观测性与错误 ----
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+thiserror = "1.0"
+
+# ---- 基础工具 ----
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+sonyflake = "0.2"
+rand = "0.8"
+dotenvy = "0.15"
+
+# ---- 构建期（im-proto 专用）----
+tonic-build = "0.12"
+prost-build = "0.13"
+protoc-bin-vendored = "3"

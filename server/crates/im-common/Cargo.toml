@@ -1,0 +1,17 @@
+[package]
+name = "im-common"
+version = "0.1.0"
+edition = "2021"
+description = "Iris 公共库：配置加载、错误类型、雪花 ID、日志初始化、Redis 键"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+sonyflake = { workspace = true }
+rand = { workspace = true }
+dotenvy = { workspace = true }
+axum = { workspace = true }

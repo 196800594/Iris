@@ -1,0 +1,6 @@
+# 固定服务端 Rust 工具链（技术文档 1 节版本锁定策略）。
+# 初始化于 2026-10-05，取当时最新 stable（crates.io 生态 MSRV 已要求 ≥1.89）；升级须走 PR 并同步技术文档基线。
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

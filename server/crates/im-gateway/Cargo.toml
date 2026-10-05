@@ -1,0 +1,24 @@
+[package]
+name = "im-gateway"
+version = "0.1.0"
+edition = "2021"
+description = "Iris WebSocket 网关：ticket 鉴权、心跳、限流、帧转发（无状态，不碰业务库）"
+
+[[bin]]
+name = "im-gateway"
+path = "src/main.rs"
+
+[dependencies]
+im-common = { path = "../im-common" }
+im-proto = { path = "../im-proto" }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+axum = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+tower = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+redis = { workspace = true }
+dotenvy = { workspace = true }

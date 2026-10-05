@@ -1,0 +1,4 @@
+# cargo fmt 默认风格（计划书 4.1 / 技术文档 3.1 编码基线：stable 工具链）
+# 仅固化 stable 支持的配置项；wrap_comments / group_imports 等
+# 注释折叠与 import 分组能力属 nightly-only（stable 下会被忽略并告警），故不启用。
+max_width = 100

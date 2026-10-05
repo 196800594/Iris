@@ -1,0 +1,181 @@
+// =====================================================================
+// Iris 即时通讯系统唯一 Protobuf 契约（计划书 5 章）
+// 包名 iris.v1；同份文件生成 Rust（prost/tonic）与 TS（ts-proto）代码。
+//
+// 演进规则（im-proto/README）：
+//   1. 字段只加不删，编号永不复用；
+//   2. 修改必须同时通过两端互通测试（CI desktop job 校验生成物 diff）；
+//   3. 新增枚举值只能追加在末尾，禁止改动既有值。
+// =====================================================================
+
+syntax = "proto3";
+
+package iris.v1;
+
+// ---------------- WebSocket 统一信封（计划书 5.1） ----------------
+
+// 帧类型：REQUEST 客户端请求 / RESPONSE 对应 id 的应答 / NOTICE 服务端主动通知
+enum FrameType {
+  FRAME_TYPE_UNSPECIFIED = 0; // 占位，proto3 枚举首值必须为 0
+  REQUEST = 1;                // 客户端 → 服务端请求
+  RESPONSE = 2;               // 服务端 → 客户端，原样带回请求 id
+  NOTICE = 3;                 // 服务端 → 客户端推送，id 固定 0
+}
+
+// 消息类型（与 messages.msg_type 列一致，计划书 5.2）
+enum MsgType {
+  MSG_TYPE_UNSPECIFIED = 0; // 占位
+  TEXT = 1;                 // 文本（content 为纯文本，≤5000 字符）
+  IMAGE = 2;                // 图片（content 为 {file_id,...} JSON）
+  FILE = 3;                 // 文件（content 为 {file_id,...} JSON）
+  SYSTEM = 4;               // 系统消息（群事件等，content 为 JSON）
+}
+
+// WebSocket 二进制帧统一信封；payload 按 method 指向具体消息体
+message Frame {
+  uint64 id = 1;        // 请求自增 id；响应/ACK 原样带回；通知固定 0
+  FrameType frame_type = 2; // 帧类型（字段编号 2 对应设计文档中的 type；避免保留字命名）
+  string method = 3;    // 方法名，如 "message.send"
+  bytes payload = 4;    // method 对应的 payload 消息序列化结果
+  uint32 code = 5;      // RESPONSE 错误码：0 成功，分段见计划书 5.3
+  string msg = 6;       // 错误描述；成功为空
+}
+
+// ---------------- C2S 业务 payload（上行 REQUEST） ----------------
+
+// method=message.send 发送消息
+message MessageSendReq {
+  string client_msg_id = 1; // 客户端 UUID，幂等键（Redis 24h + 库唯一键双层兜底）
+  uint64 conv_id = 2;       // 目标会话 ID
+  MsgType msg_type = 3;     // 消息类型
+  string content = 4;       // 文本原文或媒体 JSON 引用
+}
+
+// NOTICE=message.ack 发送确认（重发同 client_msg_id 返回同一 ack）
+message MessageAckNotice {
+  string client_msg_id = 1; // 回显幂等键
+  uint64 server_msg_id = 2; // 服务端消息雪花 ID
+  uint64 conv_id = 3;       // 会话 ID
+  uint64 seq = 4;           // 会话内定序序号
+  int64 create_time_ms = 5; // 服务端落库时间（毫秒），排序以服务端为准
+}
+
+// method=conv.sync 差量同步请求（游标数组，每会话独立游标）
+message ConvSyncReq {
+  repeated ConvCursor cursors = 1; // 每会话游标
+  uint32 batch_size = 2;           // 单会话单批条数上限（默认 200）
+}
+
+// 会话游标：客户端已持有该会话的 seq 位置
+message ConvCursor {
+  uint64 conv_id = 1; // 会话 ID
+  uint64 has_seq = 2; // 本地已同步到的 seq；服务端返回其后消息
+}
+
+// 同步返回的单条消息（历史消息分页同构）
+message SyncMessage {
+  uint64 id = 1;            // 消息雪花 ID
+  uint64 conv_id = 2;       // 会话 ID
+  uint64 sender_id = 3;     // 发送者 uid
+  MsgType msg_type = 4;     // 消息类型
+  string content = 5;       // 文本原文或媒体 JSON
+  uint64 seq = 6;           // 会话内序号
+  string client_msg_id = 7; // 幂等键（客户端去重用）
+  int64 create_time_ms = 8; // 服务端时间毫秒
+}
+
+// conv.sync 单会话一批返回；has_more=true 需继续以最后 seq 翻页
+message ConvSyncResp {
+  uint64 conv_id = 1;              // 会话 ID
+  repeated SyncMessage messages = 2; // 本批消息（seq 升序）
+  bool has_more = 3;               // 是否还有更多
+}
+
+// method=conv.read 上报已读水位（仅允许单调前进）
+message ConvReadReq {
+  uint64 conv_id = 1; // 会话 ID
+  uint64 read_seq = 2; // 已读到的 seq
+}
+
+// NOTICE=conv.read 已读通知（一期仅单聊发给对方；群聊不广播，计划书 6.4）
+message ConvReadNotice {
+  uint64 conv_id = 1;  // 会话 ID
+  uint64 user_id = 2;  // 上报者 uid
+  uint64 read_seq = 3; // 新已读水位
+}
+
+// NOTICE=message.push 完整消息推送（含发送者资料快照，客户端免二次查询）
+message MessagePush {
+  SyncMessage message = 1;   // 消息本体
+  string sender_nickname = 2; // 发送者昵称快照
+  string sender_avatar = 3;   // 发送者头像下载路径快照（空=默认头像）
+}
+
+// NOTICE=presence.change 好友在线状态变更（服务端限频 10 秒/人）
+message PresenceChangeNotice {
+  uint64 user_id = 1; // 变更的用户
+  bool online = 2;    // true 上线 / false 离线
+}
+
+// NOTICE=group.event 群事件（event_type 一期固定：
+// invited / join / leave / transfer / profile，计划书 6.5）
+message GroupEventNotice {
+  uint64 group_id = 1; // 群 ID
+  string event_type = 2; // 事件类型枚举字符串
+  string data_json = 3;  // 事件数据（如变更后群名、操作者 uid）JSON
+}
+
+// ---------------- S2S：gateway ↔ logic gRPC 双向流（计划书 5.4） ----------------
+
+// 每个 gateway 实例与 logic 维持一条 bidi 流；断线指数退避重连（1→30s）
+service GatewayLink {
+  // Open：gateway 为客户端，上行 Upstream，接收 Downstream
+  rpc Open(stream Upstream) returns (stream Downstream);
+}
+
+// 上行首帧：网关节点自报家门；logic 以 node_id 作为下行路由目标
+message NodeHello {
+  string node_id = 1; // 网关节点唯一标识（GATEWAY_NODE_ID，留空取主机名）
+}
+
+// 上行：网关转发的客户端帧（已通过 ticket 鉴权）
+message ClientMsg {
+  uint64 uid = 1;      // 已鉴权用户 ID
+  uint64 conn_id = 2;  // 网关内连接 ID（响应回投原连接用）
+  Frame frame = 3;     // 客户端原始帧
+}
+
+// 上行：用户在线状态事件（连接计数 0→1 / 1→0 时发送）
+message PresenceEvent {
+  uint64 uid = 1;   // 用户 ID
+  bool online = 2;  // true 首连 / false 末断
+}
+
+// 上行三选一
+message Upstream {
+  oneof body {
+    NodeHello node_hello = 1;         // 首帧注册节点
+    ClientMsg client_msg = 2;         // 客户端帧转发
+    PresenceEvent presence_event = 3; // 在线状态事件
+  }
+}
+
+// 下行：向一批用户（在该节点上）推送一帧；logic 按节点聚合，群扇出一条 Push
+message Push {
+  repeated uint64 uids = 1; // 目标用户列表（须都挂在本节点）
+  Frame frame = 2;          // 完整帧（NOTICE 或 RESPONSE）
+}
+
+// 下行：强制某用户全部连接下线（refresh 盗用整族吊销 / 账号禁用，计划书 5.4）
+message ForceKick {
+  uint64 uid = 1;    // 目标用户
+  string reason = 2; // 下线原因（客户端提示用）
+}
+
+// 下行二选一
+message Downstream {
+  oneof body {
+    Push push = 1;             // 消息/通知推送
+    ForceKick force_kick = 2;  // 强制下线
+  }
+}

@@ -1,0 +1,14 @@
+[package]
+name = "im-proto"
+version = "0.1.0"
+edition = "2021"
+description = "Iris 唯一 Protobuf 契约：构建期生成 Rust（prost/tonic）与 TS（ts-proto）代码"
+
+[dependencies]
+prost = { workspace = true }
+tonic = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+prost-build = { workspace = true }
+protoc-bin-vendored = { workspace = true }

@@ -1,0 +1,137 @@
+name: iris
+
+# 统一日志轮转锚点：防止演示机长跑容器 json 日志撑满磁盘
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+# 【环境变量唯一入口】同目录 .env（由 .env.example 复制）：
+#   - 业务参数与秘密经 env_file 注入容器（compose 运行时唯一通道）
+#   - 容器内拓扑差异（服务名/路径）由各服务 environment 段覆盖
+#   - 禁止 docker run -e、挂载 .env、镜像内 ENV 秘密（计划书 12.2）
+
+services:
+  mysql:
+    image: mysql:8.4                 # 版本固定，生产再加 @digest（技术文档 3.3）
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: ${TZ}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [iris]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [iris]
+
+  logic:
+    build: { context: ., dockerfile: deploy/logic.Dockerfile }
+    env_file: [.env]                 # 全部业务参数（含秘密）由 compose 统一注入
+    environment:                     # 只覆盖容器内拓扑/路径（非秘密、不进 .env）
+      MYSQL_HOST: mysql
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /data/uploads    # 与下方 uploads_data 挂载点一致
+    ports: ["127.0.0.1:7200:7200"]   # 生产经 Caddy 暴露，可去掉宿主机映射
+    volumes:
+      - uploads_data:/data/uploads
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/app/im-logic", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    stop_grace_period: 30s
+    networks: [iris]
+
+  gateway:
+    build: { context: ., dockerfile: deploy/gateway.Dockerfile }
+    env_file: [.env]                 # 全部业务参数（含秘密）由 compose 统一注入
+    environment:                     # 只覆盖容器内拓扑
+      REDIS_URL: redis://redis:6379/0
+      LOGIC_GRPC_ENDPOINT: http://logic:7201
+    ports: ["127.0.0.1:7100:7100"]
+    depends_on:
+      logic: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/app/im-gateway", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    stop_grace_period: 30s
+    networks: [iris]
+
+  caddy:
+    profiles: ["edge"]              # 默认不启动；--profile edge 才启动（仅生产）
+    image: caddy:2.8-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [logic, gateway]
+    logging: *default-logging
+    healthcheck:                     # caddy:alpine 不带 curl，用 busybox 自带 wget
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [iris]
+
+  # 可选定时备份（W15 落地）：docker compose --profile backup up -d backup
+  # 容器内每日调用挂载进来的 deploy/backup.sh 执行 mysqldump，滚动保留 14 份
+  backup:
+    profiles: ["backup"]
+    image: mysql:8.4
+    env_file: [.env]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: ${TZ}
+    volumes:
+      - ./deploy/backup.sh:/backup.sh:ro
+      - backup_data:/backup
+    command: ["bash", "-c", "while true; do bash /backup.sh || true; sleep 86400; done"]
+    depends_on:
+      mysql: { condition: service_healthy }
+    logging: *default-logging
+    networks: [iris]
+
+volumes:
+  mysql_data:
+  redis_data:
+  uploads_data:
+  caddy_data:
+  caddy_config:
+  backup_data:
+
+networks:
+  iris:

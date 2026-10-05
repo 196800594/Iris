@@ -1,0 +1,76 @@
+# Iris CI（计划书 11 章）：仓库卫生检查 + server 双检查 + 构建冒烟。
+# desktop job 待 W3 桌面端初始化后启用（见文末注释模板）。
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  # 仓库卫生检查（计划书 4.1/11）：秘密未入库、必需 README/ignore 齐全
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 秘密文件不得被 git 跟踪
+        run: |
+          tracked="$(git ls-files)"
+          if echo "$tracked" | grep -E '(^|/)\.env$|(^|/)\.env\.[^.]+$|\.pem$|\.key$'; then
+            echo "::error::秘密文件被跟踪"; exit 1
+          fi
+      - name: 必需 README 存在（desktop 两份待 W3 加入）
+        run: |
+          for f in README.md server/README.md \
+                   server/crates/im-proto/README.md \
+                   server/crates/im-common/README.md \
+                   server/crates/im-gateway/README.md \
+                   server/crates/im-logic/README.md; do
+            [ -f "$f" ] || { echo "::error::缺少 $f"; exit 1; }
+          done
+      - name: 忽略文件存在
+        run: |
+          for f in .gitignore .gitattributes .editorconfig \
+                   server/.gitignore server/.dockerignore; do
+            [ -f "$f" ] || { echo "::error::缺少 $f"; exit 1; }
+          done
+
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85.0"
+          components: rustfmt, clippy
+      # 依赖缓存：按 Cargo.lock 哈希
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: 格式检查
+        run: cargo fmt --all -- --check
+      - name: Clippy（零警告）
+        run: cargo clippy --workspace -- -D warnings
+      - name: 单元测试
+        # W2 起引入 query! 宏后需配合 SQLX_OFFLINE=true 与入库的 .sqlx/ 元数据；
+        # 集成测试（testcontainers）需先起 MySQL/Redis 服务容器，W2 补齐。
+        run: cargo test --workspace
+        env:
+          SQLX_OFFLINE: "true"
+      - name: Dockerfile 构建冒烟
+        run: |
+          docker build -f deploy/logic.Dockerfile -t iris-logic:ci .
+          docker build -f deploy/gateway.Dockerfile -t iris-gateway:ci .
+
+  # desktop（W3 启用）：
+  #   runs-on: ubuntu-latest
+  #   defaults: { run: { working-directory: desktop } }
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4 (Node 20) + pnpm/action-setup@v4 (pnpm 9)
+  #     - run: pnpm install --frozen-lockfile
+  #     - run: pnpm proto && git diff --exit-code   # 契约生成物无 diff
+  #     - run: pnpm typecheck && pnpm lint && pnpm test

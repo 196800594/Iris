@@ -1,0 +1,5 @@
+# clippy 阈值配置（CI 以 `-D warnings` 零警告为准）
+# 消息处理函数参数固定（id/conv/uid/type/content），放宽参数数量告警阈值
+too-many-arguments-threshold = 10
+# 演示机 4C8G，类型复杂度告警保持默认，这里仅显式声明便于后续调整
+cognitive-complexity-threshold = 30

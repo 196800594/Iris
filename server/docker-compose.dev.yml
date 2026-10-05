@@ -1,0 +1,20 @@
+# 开发覆盖文件（技术文档 8.2）：
+#   用途："基础设施容器化、服务本机 cargo 跑"的开发模式
+#   用法：docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mysql redis
+#   要点：3306/6379 映射到宿主机 127.0.0.1、上传卷换本机 bind mount、日志级别 debug
+services:
+  mysql:
+    ports: ["127.0.0.1:3306:3306"]   # 本机 cargo 直跑连这里
+
+  redis:
+    ports: ["127.0.0.1:6379:6379"]
+
+  logic:
+    environment:
+      RUST_LOG: debug
+    volumes:
+      - ./data/uploads:/data/uploads  # 本机 bind mount 便于直接查看上传文件
+
+  gateway:
+    environment:
+      RUST_LOG: debug

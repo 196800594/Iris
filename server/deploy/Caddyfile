@@ -1,0 +1,32 @@
+# =====================================================================
+# Iris 可选边缘反代（仅生产启用：docker compose --profile edge up -d caddy）
+# 开发模式不使用 Caddy（客户端直连 7100/7200，见技术文档 7.3）
+# 用法：把「你的域名」替换为真实域名；ACME 邮箱建议在全局块补充 email 选项
+# =====================================================================
+
+{
+	# 生产建议：email you@example.com   # Let's Encrypt 通知邮箱
+}
+
+# ---- HTTP(80)：健康检查 + 其余跳转 HTTPS ----
+:80 {
+	handle /healthz {
+		respond "ok" 200
+	}
+	handle {
+		redir https://{host}{uri} 308
+	}
+}
+
+# ---- HTTPS(443)：/ws → gateway，其余 → logic ----
+# 证书由 Caddy 自动申请与续期（Let's Encrypt），卷 caddy_data 持久化
+https://你的域名 {
+	# 必须同时匹配 /ws 与 /ws/*：WS 握手路径是 /ws?ticket=...（无尾斜杠）
+	@ws path /ws /ws/*
+	handle @ws {
+		reverse_proxy gateway:7100
+	}
+	handle {
+		reverse_proxy logic:7200
+	}
+}
