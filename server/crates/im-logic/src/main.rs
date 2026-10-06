@@ -19,9 +19,11 @@
 mod auth;
 mod contacts;
 mod conversations;
+mod files;
 mod groups;
 mod grpc;
 mod http;
+mod id_serde;
 mod message;
 mod middleware;
 mod users;
@@ -43,6 +45,8 @@ pub struct AppState {
     pub redis: redis::aio::MultiplexedConnection,
     /// 在线网关节点注册表：node_id → 下行发送通道（流即注册，流断即摘除）
     pub nodes: grpc::NodeRegistry,
+    /// 文件存储后端（一期 LocalFs；二期可替换为 Oss/S3，业务代码不变，计划书 6.7）
+    pub storage: files::LocalFs,
 }
 
 #[tokio::main]
@@ -85,11 +89,15 @@ async fn main() {
         .await
         .expect("Redis 连接失败");
 
+    // 文件存储后端（构造时确保 STORAGE_ROOT 目录存在）
+    let storage = files::LocalFs::new(cfg.storage_root.clone());
+
     let state = Arc::new(AppState {
         cfg,
         pool,
         redis,
         nodes: grpc::NodeRegistry::new(),
+        storage,
     });
 
     // ---- 并发启动 gRPC(7201) 与 REST(7200) ----

@@ -1,0 +1,35 @@
+[package]
+name = "iris-desktop"
+version = "0.1.0"
+description = "Iris 即时通讯桌面客户端"
+authors = ["Iris"]
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+# Tauri 2 约定：核心逻辑放 lib（移动端复用），main 仅入口
+name = "iris_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+# 系统通知（W14：消息到达时 OS 通知）
+tauri-plugin-notification = "2"
+# 本地 SQLite 缓存（W14：会话/消息本地缓存，游标差量同步的底座）
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 令牌 keyring 存储（计划书 8.3：Windows 凭据管理器，不落业务库）
+keyring = "3"
+
+[profile.release]
+# 发布包体积优化（Tauri 官方推荐）
+panic = "abort"
+codegen-units = 1
+lto = true
+incremental = false
+opt-level = "s"
+strip = true

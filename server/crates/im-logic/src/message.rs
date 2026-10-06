@@ -110,17 +110,22 @@ async fn send_message(
     if req.client_msg_id.len() > 36 {
         return Err(AppError::invalid_content("client_msg_id 过长"));
     }
-    let content = req.content.trim();
-    if content.is_empty() {
-        return Err(AppError::invalid_content("消息内容不能为空"));
-    }
-    if content.chars().count() > TEXT_CONTENT_MAX {
-        return Err(AppError::invalid_content("消息内容超长（≤5000 字符）"));
-    }
-    // 客户端仅允许发 TEXT/IMAGE/FILE；SYSTEM 由服务端在群事件事务内写入
-    if !(1..=3).contains(&req.msg_type) {
-        return Err(AppError::invalid_content("msg_type 不允许"));
-    }
+    // 客户端仅允许 TEXT(1)/IMAGE(2)/FILE(3)；SYSTEM(4) 由服务端在群事件事务内写入
+    // TEXT：纯文本 ≤5000 字符；IMAGE/FILE：files 表引用 JSON（计划书 5.2）
+    let content: String = match req.msg_type {
+        1 => {
+            let text = req.content.trim();
+            if text.is_empty() {
+                return Err(AppError::invalid_content("消息内容不能为空"));
+            }
+            if text.chars().count() > TEXT_CONTENT_MAX {
+                return Err(AppError::invalid_content("消息内容超长（≤5000 字符）"));
+            }
+            text.to_string()
+        }
+        2 | 3 => validate_media_content(state, uid, req.msg_type, &req.content).await?,
+        _ => return Err(AppError::invalid_content("msg_type 不允许")),
+    };
 
     // ---- 会话定位（懒创建单聊 / 校验成员与好友） ----
     let conv_id = if req.conv_id == 0 {
@@ -228,6 +233,74 @@ async fn send_message(
     .unwrap_or(0);
 
     Ok((msg_id, seq, create_time_ms, conv_id))
+}
+
+/// 校验 IMAGE/FILE 消息的媒体引用 JSON（计划书 5.2：信令只传引用，文件本体走 HTTP）。
+///
+/// content 形如 `{file_id, name, size, mime, width?, height?, thumb_file_id?}`：
+/// - 必须是 JSON 对象且含非空 `file_id/name/size/mime`；
+/// - file_id 对应文件必须存在、上传者为本人（防枚举/盗用他人 file_id）、
+///   类型与消息类型匹配（IMAGE→files.kind=1，FILE→kind=2；头像 kind=3 不作消息发送）。
+///
+/// 校验通过返回 trim 后的原始 JSON 字符串（直接入库，客户端按同构 JSON 解析渲染）。
+async fn validate_media_content(
+    state: &AppState,
+    uid: u64,
+    msg_type: i32,
+    raw: &str,
+) -> Result<String, AppError> {
+    let raw = raw.trim();
+    let value: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|_| AppError::invalid_content("媒体消息 content 必须是合法 JSON"))?;
+
+    // 必填字段：file_id（正整数字符串/数字均可，雪花 ID 超过 JS 安全整数时客户端用字符串）
+    let file_id = value
+        .get("file_id")
+        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .filter(|id| *id > 0)
+        .ok_or_else(|| AppError::invalid_content("媒体消息缺少 file_id"))?;
+    if value
+        .get("name")
+        .and_then(|v| v.as_str())
+        .is_none_or(|s| s.is_empty() || s.chars().count() > 255)
+    {
+        return Err(AppError::invalid_content("媒体消息缺少合法 name"));
+    }
+    value
+        .get("size")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| AppError::invalid_content("媒体消息缺少 size"))?;
+    if value
+        .get("mime")
+        .and_then(|v| v.as_str())
+        .is_none_or(|s| s.is_empty() || s.len() > 128)
+    {
+        return Err(AppError::invalid_content("媒体消息缺少合法 mime"));
+    }
+
+    // 文件存在性 + 归属 + 类型匹配（BIGINT UNSIGNED→u64，TINYINT→i8）
+    let row: Option<(u64, i8)> = sqlx::query_as(
+        "SELECT uploader_id, kind FROM files WHERE id = ? LIMIT 1",
+    )
+    .bind(file_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(file_id, error = %e, "媒体引用校验查询失败");
+        AppError::internal()
+    })?;
+    let Some((uploader_id, kind)) = row else {
+        return Err(AppError::invalid_content("文件不存在或已失效"));
+    };
+    if uploader_id != uid {
+        return Err(AppError::invalid_content("只能发送本人上传的文件"));
+    }
+    let expect_kind = if msg_type == 2 { 1 } else { 2 };
+    if kind != expect_kind {
+        return Err(AppError::invalid_content("文件类型与消息类型不匹配"));
+    }
+
+    Ok(raw.to_string())
 }
 
 /// 加载既有消息组装 ack：`(server_msg_id, seq, create_time_ms, conv_id)`。

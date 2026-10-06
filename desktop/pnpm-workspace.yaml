@@ -1,0 +1,5 @@
+# pnpm 12 设置（package.json 的 "pnpm" 字段已不再读取；旧名 onlyBuiltDependencies 已废弃）
+# 允许执行的依赖构建脚本：esbuild 安装平台二进制；protobufjs 放行其安装脚本
+allowBuilds:
+  esbuild: true
+  protobufjs: true

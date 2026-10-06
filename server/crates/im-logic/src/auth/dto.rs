@@ -24,6 +24,9 @@ pub struct RegisterReq {
         regex(path = "username_re()", message = "用户名只能包含字母、数字、下划线")
     )]
     pub username: String,
+    /// 昵称：必填，1-32 位
+    #[validate(length(min = 1, max = 32, message = "昵称长度须为 1-32 位"))]
+    pub nickname: String,
     /// 邮箱（归一化后查重）
     #[validate(email(message = "邮箱格式不正确"))]
     pub email: String,

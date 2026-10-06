@@ -282,7 +282,7 @@ pub async fn register(
     }
     sqlx::query("INSERT INTO user_profiles (user_id, nickname) VALUES (?, ?)")
         .bind(uid)
-        .bind(&username)
+        .bind(req.nickname.trim())
         .execute(&mut *tx)
         .await
         .map_err(|e| {

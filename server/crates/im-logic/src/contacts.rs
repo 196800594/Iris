@@ -61,7 +61,8 @@ pub fn router() -> axum::Router<Arc<AppState>> {
 /// POST /contacts/requests 请求体。
 #[derive(Debug, Deserialize, Validate)]
 pub struct ApplyReq {
-    /// 目标用户 ID（雪花，数值）
+    /// 目标用户 ID（雪花；JSON 数字或数字字符串均可）
+    #[serde(deserialize_with = "crate::id_serde::de_u64")]
     pub to_uid: u64,
     /// 打招呼内容（可空，最长 64 字符，DDL VARCHAR(64)）
     #[validate(length(max = 64, message = "打招呼最长 64 字符"))]

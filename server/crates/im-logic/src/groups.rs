@@ -79,7 +79,8 @@ pub struct CreateGroupReq {
     #[validate(length(min = 1, max = 64, message = "群名须为 1-64 字符"))]
     pub name: String,
     /// 初始成员（不含本人；必须是本人好友，上限为群容量 - 1）
-    #[serde(default)]
+    /// 元素支持 JSON 数字或数字字符串（雪花 ID 超 JS 安全整数）
+    #[serde(default, deserialize_with = "crate::id_serde::de_u64_vec")]
     pub member_ids: Vec<u64>,
 }
 
@@ -98,6 +99,8 @@ pub struct UpdateGroupReq {
 #[derive(Debug, Deserialize)]
 pub struct InviteReq {
     /// 被邀请用户列表（必须是本人好友且非群成员；去重后批量入群）
+    /// 元素支持 JSON 数字或数字字符串（雪花 ID 超 JS 安全整数）
+    #[serde(deserialize_with = "crate::id_serde::de_u64_vec")]
     pub user_ids: Vec<u64>,
 }
 
@@ -112,14 +115,16 @@ pub struct ApplyJoinReq {
 /// POST /groups/{id}/admins 请求体。
 #[derive(Debug, Deserialize)]
 pub struct AdminReq {
-    /// 目标用户（须为群内普通成员）
+    /// 目标用户（须为群内普通成员；JSON 数字或数字字符串均可）
+    #[serde(deserialize_with = "crate::id_serde::de_u64")]
     pub user_id: u64,
 }
 
 /// POST /groups/{id}/transfer 请求体。
 #[derive(Debug, Deserialize)]
 pub struct TransferReq {
-    /// 新群主（须为群内成员）
+    /// 新群主（须为群内成员；JSON 数字或数字字符串均可）
+    #[serde(deserialize_with = "crate::id_serde::de_u64")]
     pub new_owner_id: u64,
 }
 

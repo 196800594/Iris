@@ -42,3 +42,23 @@ curl http://127.0.0.1:7200/healthz   # {"status":"ok","db":true,"redis":true,...
 REST 全清单见技术文档 5.2 节；WS 方法集见计划书 5.2 节。
 常见启动失败：端口占用（7200/7201）、`MYSQL_PASSWORD` 与容器初始化不一致
 （改 compose 卷重建或改回密码）、迁移 checksum 不符（迁移脚本已被改动，禁止改旧脚本）。
+
+## 文件模块（files，W13，计划书 6.7）
+
+| 方法与路径 | 鉴权 | 说明 |
+|---|---|---|
+| `POST /api/v1/files/upload` | Bearer | multipart 表单：字段 `file`（必填）+ `kind`（可选 `image`/`file`/`avatar`，缺省按 MIME 自动判别）。图片/头像解码取宽高并生成 **200px 宽 JPEG 缩略图**。返回 `file_id/kind/name/size/mime/width/height/url/thumb_url` |
+| `GET /api/v1/files/{id}?expires=&sig=[&thumb=1]` | HMAC query 签名 | 下载（query 鉴权便于 `<img>` 引用）；图片 inline、其他 attachment（中文名 RFC 5987 编码） |
+| `GET /api/v1/files/{id}/sign` | Bearer | 按 file_id 换发一对新短期签名 URL（历史消息渲染用，签名默认 5 分钟过期） |
+
+要点：
+
+- 签名 `sig = HMAC-SHA256(SIGNED_URL_SECRET, "{file_id}.{expires}")`（小写 hex）；
+- 大小：图片 ≤ `IMAGE_MAX_BYTES`(20MiB)，其他 ≤ `FILE_MAX_BYTES`(100MiB)，超限 4002；
+- MIME 白名单：图片 jpeg/png/gif/webp/bmp；文件 pdf/zip/txt/Office 新旧格式，其余 4001；
+  扩展名由服务端按 MIME 规范化，不信任客户端后缀；
+- 存储路径与原始文件名无关：`{STORAGE_ROOT}/yyyy/mm/dd/{雪花ID}.{ext}`，
+  缩略图 `{id}_thumb.jpg`；[`files::Storage`] trait 已抽象，二期新增 OSS/S3 业务代码不变；
+- 媒体消息：WS `message.send` 的 `msg_type=2/3` 时 content 必须是引用 JSON
+  `{file_id,name,size,mime,width?,height?}`，服务端校验文件存在、**上传者为本人**、类型匹配，
+  否则 2003；头像（kind=3）不作消息发送。

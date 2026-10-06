@@ -108,6 +108,21 @@ impl AppError {
         Self::new(1006, msg)
     }
 
+    /// 4001 文件类型不在白名单（计划书 5.3 文件域）。
+    pub fn file_type_unsupported() -> Self {
+        Self::new(4001, "文件类型不允许")
+    }
+
+    /// 4002 文件超过大小上限（图片 20MiB / 其他 100MiB，计划书 6.7）。
+    pub fn file_too_large() -> Self {
+        Self::new(4002, "文件大小超过限制")
+    }
+
+    /// 4003 签名错误/过期（文件下载 HMAC 校验失败）。
+    pub fn bad_signature() -> Self {
+        Self::new(4003, "签名错误或下载链接已过期")
+    }
+
     /// 5000 段内部错误：对外模糊化，只回"服务繁忙"。
     pub fn internal() -> Self {
         Self::new(5000, "服务繁忙，请稍后再试")

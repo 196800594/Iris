@@ -15,13 +15,16 @@ use tower_http::trace::TraceLayer;
 
 use crate::AppState;
 
-/// /api/v1 业务路由集合（W2：auth + users；W3：contacts；W4-5：conversations；W6-7：groups）。
-fn api_routes() -> Router<Arc<AppState>> {
+/// /api/v1 业务路由集合（auth/users/contacts/conversations/groups/files）。
+fn api_routes(state: &Arc<AppState>) -> Router<Arc<AppState>> {
+    // multipart 上传 body 上限 = 普通文件上限 + 1MiB 表单边界开销（计划书 6.7）
+    let upload_limit = state.cfg.file_max_bytes + crate::files::MULTIPART_HEADROOM;
     crate::auth::router()
         .merge(crate::users::router())
         .merge(crate::contacts::router())
         .merge(crate::conversations::router())
         .merge(crate::groups::router())
+        .merge(crate::files::router(upload_limit))
 }
 
 /// 组装 REST 路由。
@@ -35,7 +38,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .route("/healthz", get(healthz))
-        .nest("/api/v1", api_routes())
+        .nest("/api/v1", api_routes(&state))
         .with_state(state)
         // request_id 先于 trace 执行（Layer 后加的先执行），保证 span 带 rid
         .layer(axum::middleware::from_fn(crate::middleware::request_id))

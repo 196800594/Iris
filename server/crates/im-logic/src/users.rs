@@ -137,7 +137,8 @@ pub struct PatchMeReq {
     /// 新昵称（1-32 字符）
     #[validate(length(min = 1, max = 32, message = "昵称长度须为 1-32 位"))]
     pub nickname: Option<String>,
-    /// 头像文件 ID；0 表示清除为默认头像
+    /// 头像文件 ID；0 表示清除为默认头像（JSON 数字或数字字符串均可）
+    #[serde(default, deserialize_with = "crate::id_serde::de_u64_opt")]
     pub avatar_file_id: Option<u64>,
     /// 性别：0 未知 1 男 2 女
     pub gender: Option<i16>,

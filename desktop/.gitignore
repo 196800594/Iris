@@ -1,0 +1,10 @@
+# 前端依赖与构建产物
+node_modules/
+dist/
+
+# Tauri 构建产物
+src-tauri/target/
+src-tauri/gen/
+
+# 本地环境覆盖
+.env.local
