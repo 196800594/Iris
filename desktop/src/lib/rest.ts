@@ -179,13 +179,18 @@ export const api = {
       code,
     }, { auth: false });
   },
-  login(account: string, password: string) {
+  login(account: string, password: string, deviceId: string, deviceName: string) {
     return request<{
       access_token: string;
       refresh_token: string;
       token_type: string;
       expires_in: number;
-    }>('POST', '/auth/login', { account, password }, { auth: false });
+    }>('POST', '/auth/login', {
+      account,
+      password,
+      device_id: deviceId,
+      device_name: deviceName,
+    }, { auth: false });
   },
   resetPassword(email: string, code: string, newPassword: string) {
     return request<{ code: number; msg: string }>(

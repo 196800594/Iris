@@ -1,7 +1,8 @@
 // 主窗口根组件：boot 恢复令牌 → enterApp（建缓存/连 WS）→ 渲染 MainLayout
 import { Component, useEffect, useState, type ReactNode } from 'react';
+import { emit } from '@tauri-apps/api/event';
 import { useAuth } from './store/auth';
-import { backToLogin } from './lib/window';
+import { backToLogin, mainWindowReady } from './lib/window';
 import { isTauri } from './lib/keyring';
 import { MainLayout } from './components/MainLayout';
 
@@ -59,16 +60,19 @@ export function MainApp() {
     };
   }, [boot]);
 
-  // boot 完成：已登录 → enterApp；未登录 → 延迟回登录窗（先显示错误）
+  // boot 完成：已登录 → 通知 Rust 显示主窗并销毁登录窗；未登录 → 返回登录窗
   useEffect(() => {
     if (booting) return;
     if (me) {
+      // boot 成功：主窗已加载完毕，销毁登录窗 + 显示主窗
+      void mainWindowReady(me.username).catch(() => {});
       void enterApp().catch((e) => console.error('[MainApp] enterApp 失败:', e));
     } else if (isTauri()) {
-      const t = setTimeout(() => void backToLogin(), 2000);
-      return () => clearTimeout(t);
+      // boot 失败（令牌无效/服务端异常）：销毁隐藏的主窗，登录窗继续显示并收到失败通知
+      void backToLogin();
+      void emit('boot:failed', bootError ?? '登录失败，请重试').catch(() => {});
     }
-  }, [booting, me, enterApp]);
+  }, [booting, me, enterApp, bootError]);
 
   if (booting) {
     return (

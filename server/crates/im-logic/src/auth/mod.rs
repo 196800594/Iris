@@ -21,6 +21,7 @@ use std::sync::Arc;
 use axum::routing::{get, post};
 use axum::Router;
 use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
 
 use crate::middleware::client_ip;
 use crate::AppState;
@@ -122,5 +123,126 @@ pub async fn verify_email_code(
             Ok(())
         }
         _ => Err(im_common::error::AppError::code_invalid()),
+    }
+}
+
+/// 活跃登录会话（`session:active:{uid}` 的值）。
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ActiveSession {
+    /// 设备唯一标识（客户端持久化 UUID）
+    pub device_id: String,
+    /// 登录来源 IP
+    pub ip: String,
+    /// 设备名称（可选）
+    #[serde(default)]
+    pub device_name: Option<String>,
+    /// 登录时间戳（秒）
+    pub login_at: i64,
+}
+
+/// 读取用户当前活跃会话（不存在返回 None）。
+pub async fn get_active_session(
+    state: &Arc<AppState>,
+    uid: u64,
+) -> Result<Option<ActiveSession>, im_common::error::AppError> {
+    let key = im_common::redis_keys::session_active(uid);
+    let mut redis = state.redis.clone();
+    let raw: Option<String> = redis.get(&key).await.map_err(|e| {
+        tracing::error!(uid, "读取活跃会话 Redis 错误: {e}");
+        im_common::error::AppError::internal()
+    })?;
+    match raw {
+        Some(s) => serde_json::from_str::<ActiveSession>(&s)
+            .map(Some)
+            .map_err(|e| {
+                tracing::error!(uid, "活跃会话 JSON 解析失败: {e}");
+                im_common::error::AppError::internal()
+            }),
+        None => Ok(None),
+    }
+}
+
+/// 写入/覆盖用户活跃会话，TTL = refresh 令牌有效期。
+pub async fn set_active_session(
+    state: &Arc<AppState>,
+    uid: u64,
+    session: &ActiveSession,
+) -> Result<(), im_common::error::AppError> {
+    let key = im_common::redis_keys::session_active(uid);
+    let mut redis = state.redis.clone();
+    let json = serde_json::to_string(session).map_err(|e| {
+        tracing::error!(uid, "活跃会话序列化失败: {e}");
+        im_common::error::AppError::internal()
+    })?;
+    let _: Result<(), _> = redis
+        .set_ex::<_, _, ()>(&key, &json, state.cfg.refresh_token_ttl_seconds)
+        .await;
+    Ok(())
+}
+
+/// 清除用户活跃会话（登出时调用）。
+pub async fn clear_active_session(state: &Arc<AppState>, uid: u64) {
+    let key = im_common::redis_keys::session_active(uid);
+    let mut redis = state.redis.clone();
+    let _: Result<i64, _> = redis.del(&key).await;
+}
+
+/// 续期活跃会话 TTL（refresh 成功时调用，保持与会话令牌同步）。
+pub async fn touch_active_session(state: &Arc<AppState>, uid: u64) {
+    let key = im_common::redis_keys::session_active(uid);
+    let mut redis = state.redis.clone();
+    let _: Result<i64, _> = redis
+        .expire(&key, state.cfg.refresh_token_ttl_seconds as i64)
+        .await;
+}
+
+/// 同账号登录互斥锁：`session:lock:{uid}`，SET NX EX 10，防止并发登录竞态。
+fn session_lock_key(uid: u64) -> String {
+    format!("session:lock:{uid}")
+}
+
+/// 尝试获取登录互斥锁；获取失败返回 Err（同账号正在登录中，请稍后重试）。
+/// 持锁期间完成「查活跃会话 → 踢旧端 → 写新会话」，避免两端同时登录双双放行。
+pub async fn acquire_session_lock(
+    state: &Arc<AppState>,
+    uid: u64,
+) -> Result<SessionLockGuard, im_common::error::AppError> {
+    let key = session_lock_key(uid);
+    let mut redis = state.redis.clone();
+    let ok: Option<String> = redis::cmd("SET")
+        .arg(&key)
+        .arg(1i64)
+        .arg("NX")
+        .arg("EX")
+        .arg(10i64)
+        .query_async(&mut redis)
+        .await
+        .map_err(|e| {
+            tracing::error!(uid, "登录锁 Redis 错误: {e}");
+            im_common::error::AppError::internal()
+        })?;
+    if ok.is_none() {
+        return Err(im_common::error::AppError::rate_limited());
+    }
+    Ok(SessionLockGuard {
+        state: state.clone(),
+        uid,
+    })
+}
+
+/// 登录互斥锁守卫：drop 时自动 DEL 锁键。
+pub struct SessionLockGuard {
+    state: Arc<AppState>,
+    uid: u64,
+}
+
+impl Drop for SessionLockGuard {
+    fn drop(&mut self) {
+        let key = session_lock_key(self.uid);
+        let mut redis = self.state.redis.clone();
+        // 异步 DEL 在 drop 中不便 await，用 spawn 兜底（锁有 10s TTL，即使未删除也会自动过期）
+        tokio::spawn(async move {
+            let _: Result<i64, _> = redis.del(&key).await;
+        });
     }
 }

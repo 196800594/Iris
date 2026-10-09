@@ -17,7 +17,10 @@ use redis::AsyncCommands;
 use validator::Validate;
 
 use super::dto::*;
-use super::{jwt, mailer, refresh_store, verify_email_code};
+use super::{
+    acquire_session_lock, clear_active_session, get_active_session, jwt, mailer, refresh_store,
+    set_active_session, touch_active_session, verify_email_code, ActiveSession,
+};
 use crate::middleware::AuthUser;
 use crate::AppState;
 use im_common::error::{ApiResult, AppError};
@@ -342,13 +345,45 @@ pub async fn login(
         return Err(AppError::invalid_credentials("账号或密码错误"));
     }
 
+    // ---- 单端登录互斥：同设备拒绝、异设备踢旧端（持锁防并发） ----
+    let device_id = req.device_id.trim().to_string();
+    let device_name = req.device_name.as_deref().map(|s| s.trim().to_string());
+    {
+        let _lock = acquire_session_lock(&state, uid).await?;
+        let existing = get_active_session(&state, uid).await?;
+        if let Some(old) = existing {
+            if old.device_id == device_id {
+                // 同一设备已有活跃登录：拒绝重复登录
+                return Err(AppError::conflict("该账户已在本设备登录"));
+            }
+            // 异设备登录：先吊销旧 refresh 族 + 踢旧端 WS，原因含登录源
+            refresh_store::revoke_all_user(&state, uid).await;
+            let source = match (&old.device_name, old.ip.as_str()) {
+                (Some(n), ip) if !n.is_empty() => format!("{n}（IP: {ip}）"),
+                (_, ip) => format!("IP: {ip}"),
+            };
+            let reason = format!("账号在其他设备登录：{source}");
+            crate::force_kick(&state, uid, &reason).await;
+            tracing::info!(uid, old_device = old.device_id, "异设备登录，已踢下线旧端");
+        }
+
+        // 写入新的活跃会话（锁内完成，确保互斥）
+        let session = ActiveSession {
+            device_id: device_id.clone(),
+            ip: ip.clone(),
+            device_name: device_name.clone(),
+            login_at: chrono::Utc::now().timestamp(),
+        };
+        set_active_session(&state, uid, &session).await?;
+    } // _lock drop：释放互斥锁后再签发令牌
+
     // 新 refresh 族 + 首枚 jti 登记 + 签发
     let family_id = refresh_store::issue_family(&state, uid).await?;
     let new_jti = uuid::Uuid::new_v4().to_string();
     refresh_store::register_login_jti(&state, &family_id, &new_jti, uid).await?;
     let pair = issue_token_pair(&state, uid, &family_id, &new_jti).await?;
 
-    tracing::info!(uid, "用户登录成功");
+    tracing::info!(uid, device_id, "用户登录成功");
     Ok(Json(pair))
 }
 
@@ -378,6 +413,8 @@ pub async fn refresh(
             new_jti,
         } => {
             let pair = issue_token_pair(&state, uid, &family_id, &new_jti).await?;
+            // 续期活跃会话 TTL，保持与 refresh 令牌同步
+            touch_active_session(&state, uid).await;
             Ok(Json(pair))
         }
         // 盗用已整族吊销并踢下线，统一按未授权处理
@@ -401,6 +438,8 @@ pub async fn logout(
             refresh_store::revoke_family(&state, &claims.fam).await;
         }
     }
+    // 清除活跃会话，允许该设备再次登录
+    clear_active_session(&state, auth.uid).await;
     Ok(Json(serde_json::json!({ "code": 0, "msg": "ok" })))
 }
 

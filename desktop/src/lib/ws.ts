@@ -39,6 +39,8 @@ class IrisSocket {
   private nextId = 1;
   /** 主动关闭标志（登出）→ 不重连 */
   private manualClose = false;
+  /** 正在连接中（start 幂等守卫） */
+  private connecting = false;
   /** 当前退避毫秒 */
   private backoff = 1000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -58,10 +60,16 @@ class IrisSocket {
   /** 连接状态变化回调（UI 展示连接状态） */
   onStatus: ((online: boolean) => void) | null = null;
 
-  /** 建立连接（登录成功后调用） */
+  /** 建立连接（登录成功后调用）。幂等：已连接/连接中直接返回，避免 StrictMode 双跑导致重复连被踢 */
   async start(): Promise<void> {
+    if (this.ws || this.connecting) return;
+    this.connecting = true;
     this.manualClose = false;
-    await this.open();
+    try {
+      await this.open();
+    } finally {
+      this.connecting = false;
+    }
   }
 
   /** 主动关闭（登出） */
@@ -98,9 +106,10 @@ class IrisSocket {
       this.onStatus?.(false);
       if (this.manualClose) return;
       if (ev.code === 4001) {
-        // ForceKick：refresh 整族吊销/重置密码，不重连
+        // ForceKick：refresh 整族吊销/重置密码/异设备登录，不重连
         this.stop();
-        this.onKicked?.('账号在其他设备登录或凭证已失效');
+        const reason = ev.reason ? String(ev.reason) : '账号在其他设备登录或凭证已失效';
+        this.onKicked?.(reason);
         return;
       }
       // 指数退避 1→2→4→8→15→30s

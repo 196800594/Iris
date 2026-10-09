@@ -8,8 +8,10 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: {
+    // 多开开发：允许 Vite 在 1420 被占用时自动递增端口（1421、1422…）
+    // Tauri 仍加载 devUrl(1420) —— 多实例共享首个 Vite 服务，代码一致不影响功能
     port: 1420,
-    strictPort: true,
+    strictPort: false,
   },
   build: {
     target: 'es2021',

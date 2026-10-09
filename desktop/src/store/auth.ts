@@ -22,7 +22,7 @@ interface AuthState {
   boot: () => Promise<void>;
   /** 主窗口专用：建缓存、绑 WS 事件、拉会话/好友、建连 */
   enterApp: () => Promise<void>;
-  login: (account: string, password: string) => Promise<void>;
+  login: (account: string, password: string, deviceId: string, deviceName: string) => Promise<void>;
   /** 用已保存的令牌对直接登录（多账号切换用） */
   loginWithToken: (access: string, refresh: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -31,11 +31,18 @@ interface AuthState {
 }
 
 /** 被踢/令牌失效的统一处理：清状态并返回登录窗 */
-async function handleForceLogout() {
+async function handleForceLogout(reason?: string) {
   await clearTokens();
   useChat.getState().reset();
   useAuth.setState({ me: null, online: false });
   await backToLogin();
+  // 通知登录页显示踢线原因（如"账号在其他设备登录"）
+  if (reason) {
+    try {
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('kicked', reason);
+    } catch { /* ignore */ }
+  }
 }
 
 /** 主窗口装配：缓存库、WS 事件、连接、会话首刷 */
@@ -45,7 +52,7 @@ async function setupAfterLogin(_me: MeInfo): Promise<void> {
   chat.bindRealtime();
   ws.onKicked = async (reason) => {
     console.warn('[ws] kicked:', reason);
-    await handleForceLogout();
+    await handleForceLogout(reason);
   };
   ws.onStatus = (online) => useAuth.setState({ online });
   await Promise.all([useChat.getState().refreshConversations(), useChat.getState().refreshFriends()]);
@@ -62,7 +69,7 @@ export const useAuth = create<AuthState>((set) => ({
   // 仅恢复令牌 + 取 me；WS 留给主窗口的 enterApp
   boot: async () => {
     setForceLogoutHandler(() => {
-      void handleForceLogout();
+      void handleForceLogout('凭证已失效，请重新登录');
     });
     try {
       const ok = await restoreTokens();
@@ -91,8 +98,8 @@ export const useAuth = create<AuthState>((set) => ({
     await setupAfterLogin(me);
   },
 
-  login: async (account, password) => {
-    const tokens = await api.login(account.trim(), password);
+  login: async (account, password, deviceId, deviceName) => {
+    const tokens = await api.login(account.trim(), password, deviceId, deviceName);
     await dlog(`login 成功, access_token 前20位=${tokens.access_token.slice(0, 20)}`);
     await saveTokens(tokens.access_token, tokens.refresh_token);
     await dlog(`saveTokens 完成`);

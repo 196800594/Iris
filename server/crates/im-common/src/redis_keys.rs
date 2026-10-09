@@ -12,6 +12,7 @@
 //! | presence:chg:{uid} | string | 10s | presence.change 推送限频（10 秒/人，防抖动风暴） |
 //! | refresh:fam:{family_id} | hash | 30d | refresh 轮换族（uid + jti→状态），盗用检测依据 |
 //! | refresh:user:{uid} | set | 30d | 用户全部 refresh 族（重置密码/登出时整族吊销） |
+//! | session:active:{uid} | string(JSON) | 30d | 用户当前活跃登录设备（device_id/ip/device_name/login_at），单端登录互斥依据 |
 
 use std::time::Duration;
 
@@ -80,6 +81,14 @@ pub fn refresh_family(family_id: &str) -> String {
 /// 用户 refresh 族集合键：`refresh:user:{uid}`（成员为 family_id）。
 pub fn refresh_user(uid: u64) -> String {
     format!("refresh:user:{uid}")
+}
+
+/// 用户当前活跃登录设备键：`session:active:{uid}`。
+///
+/// 值为 JSON `{ device_id, ip, device_name, login_at }`；TTL 与 refresh 令牌一致。
+/// 登录时写入；同设备重复登录拒绝；异设备登录则踢旧端并覆盖。
+pub fn session_active(uid: u64) -> String {
+    format!("session:active:{uid}")
 }
 
 /// refresh 族 Hash 内的属主字段名。

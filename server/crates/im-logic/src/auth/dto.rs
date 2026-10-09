@@ -47,6 +47,12 @@ pub struct LoginReq {
     /// 密码明文（仅 TLS 链路内传输，服务端 argon2id 校验）
     #[validate(length(min = 1, max = 64, message = "密码不能为空"))]
     pub password: String,
+    /// 设备唯一标识（客户端持久化 UUID），用于同端登录互斥与异端踢线识别
+    #[validate(length(min = 1, max = 128, message = "device_id 不能为空"))]
+    pub device_id: String,
+    /// 设备名称（如主机名），可选，用于踢线提示文案
+    #[serde(default)]
+    pub device_name: Option<String>,
 }
 
 /// 刷新令牌请求（POST /auth/refresh）。

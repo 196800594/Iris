@@ -4,11 +4,12 @@
 // - 切换账号：列出所有已存账号，可切换或删除
 // - 校验：失焦校验单字段；提交校验全部；错误显示在输入框下方（带警告图标）
 import { useEffect, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { api, ApiError, getTokens } from '../lib/rest';
 import { useAuth } from '../store/auth';
 import { Avatar } from '../components/Avatar';
 import { TitleBar } from '../components/TitleBar';
-import { openMainWindow } from '../lib/window';
+import { openMainWindow, getDeviceInfo } from '../lib/window';
 import {
   listAccounts,
   saveAccount,
@@ -155,6 +156,28 @@ export function Login() {
     return () => clearTimeout(t);
   }, [cooldown]);
 
+  // 监听主窗 boot 失败 / 被踢下线：重置「登录中…」状态并显示错误
+  useEffect(() => {
+    let unlistenBoot: (() => void) | undefined;
+    let unlistenKicked: (() => void) | undefined;
+    void listen<string>('boot:failed', (e) => {
+      setBusy(false);
+      setErr(e.payload || '登录失败，请重试');
+    }).then((fn) => {
+      unlistenBoot = fn;
+    });
+    void listen<string>('kicked', (e) => {
+      setBusy(false);
+      setErr(e.payload || '您的账号已在其他设备登录');
+    }).then((fn) => {
+      unlistenKicked = fn;
+    });
+    return () => {
+      unlistenBoot?.();
+      unlistenKicked?.();
+    };
+  }, []);
+
   const changeMode = (m: Mode) => {
     setMode(m);
     setErr('');
@@ -221,12 +244,14 @@ export function Login() {
     }
     setErr('');
     setBusy(true);
+    let stayBusy = false;
     try {
       // 保存全局偏好
       await savePrefs({ rememberPassword: rememberPwd, agreedTerms: agreed });
 
       if (mode === 'login') {
-        await login(account, password);
+        const dev = await getDeviceInfo();
+        await login(account, password, dev.device_id, dev.device_name);
         // 记住密码：将账号密码+令牌+资料存入多账号凭据
         if (rememberPwd) {
           const info = useAuth.getState().me;
@@ -256,7 +281,8 @@ export function Login() {
           await removeAccount(account.trim());
         }
         await openMainWindow();
-        // 登录窗由 Rust 侧异步销毁（open_main_window 内部延迟 150ms destroy）
+        // 登录成功：主窗隐藏创建中，登录窗持续显示「登录中…」直到主窗 boot 完毕被销毁
+        stayBusy = true;
       } else if (mode === 'register') {
         await api.register(username.trim(), nickname.trim(), email.trim(), password, code.trim());
         // 注册成功：提示并回到登录页（不自动登录）
@@ -277,7 +303,7 @@ export function Login() {
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
-      setBusy(false);
+      if (!stayBusy) setBusy(false);
     }
   };
 
@@ -285,6 +311,7 @@ export function Login() {
   const enterWithAccount = async (acc: SavedAccount) => {
     setErr('');
     setBusy(true);
+    let stayBusy = false;
     try {
       // 从已存账号取令牌（注意：当前活动令牌在 iris.access，这里需要恢复该账号的令牌）
       // 由于 saveAccount 时未存令牌，需重新登录；若已存令牌则直接用
@@ -306,7 +333,8 @@ export function Login() {
         last_used: Date.now(),
       });
       await openMainWindow();
-      // 登录窗由 Rust 侧异步销毁
+      // 主窗隐藏创建中，登录窗持续显示「登录中…」直到主窗 boot 完毕被销毁
+      stayBusy = true;
     } catch (e) {
       // 令牌失效，删除该账号并回登录表单
       await removeAccount(acc.username);
@@ -316,7 +344,7 @@ export function Login() {
       setView(list.length > 0 ? 'picker' : 'form');
       setErr('登录已过期，请重新登录');
     } finally {
-      setBusy(false);
+      if (!stayBusy) setBusy(false);
     }
   };
 

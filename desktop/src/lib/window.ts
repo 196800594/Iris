@@ -41,10 +41,16 @@ export async function hideToTray() {
   await invoke('win_hide');
 }
 
-/** 打开主窗口（登录成功后调用）。非 Tauri 环境直接返回。 */
+/** 登录成功后打开主窗口（先隐藏创建）；主窗 boot 完成后再调 mainWindowReady 显示并销毁登录窗。 */
 export async function openMainWindow() {
   if (!isTauri()) return;
   await invoke('open_main_window');
+}
+
+/** 主窗口前端 boot 完成：销毁登录窗 + 显示主窗。传入账号名用于托盘提示。 */
+export async function mainWindowReady(account?: string) {
+  if (!isTauri()) return;
+  await invoke('main_window_ready', { account: account ?? null });
 }
 
 /** 登出后返回登录窗口：显示登录窗并由 Rust 侧异步销毁当前（主）窗口。
@@ -89,6 +95,14 @@ export async function onChatRefresh(callback: () => void) {
 
 /** 在线状态（与系统托盘菜单共享）。 */
 export type Presence = 'online' | 'away' | 'busy' | 'dnd' | 'invisible';
+
+/** 获取设备信息（持久化 device_id + 主机名），用于服务端单端登录互斥。 */
+export async function getDeviceInfo(): Promise<{ device_id: string; device_name: string }> {
+  if (!isTauri()) {
+    return { device_id: 'browser-' + Math.random().toString(36).slice(2, 10), device_name: 'Browser' };
+  }
+  return invoke('get_device_info') as Promise<{ device_id: string; device_name: string }>;
+}
 
 /** 监听托盘菜单切换的在线状态（Rust 端 emit 'presence:changed'）。 */
 export async function onPresenceChanged(callback: (p: Presence) => void) {
